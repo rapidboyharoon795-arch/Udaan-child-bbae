@@ -1,4 +1,4 @@
-name: Android CI/CD - UdaanChild (No Wrapper Version)
+name: Android CI/CD - UdaanChild
 
 on:
   push:
@@ -19,15 +19,14 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          # Humne 'cache: gradle' hata diya kyunki wrapper nahi hai
-          # Isse build thoda slow hoga par chal jayega
+          cache: gradle
 
-      # YAHAN HUMNE 'chmod gradlew' KO HATA DIYA KYUNKI FILE HAI HI NAHI
-      
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # YAHAN DHAYAN DEIN: Humne 'gradle' ki jagah './gradlew' use kiya hai
       - name: Build Debug APK
-        # Humne './gradlew' ki jag jagah seedha 'gradle' command use kiya hai
-        # GitHub ke Ubuntu server par 'gradle' pehle se installed hota hai
-        run: gradle assembleDebug
+        run: ./gradlew assembleDebug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
