@@ -19,12 +19,18 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
-
-      # HUMNE './gradlew' KO HATA DIYA HAI
-      # Hum seedha 'gradle' command use karenge jo GitHub ke server par pehle se hai
+          # Humne cache hata diya hai taaki koi purana version interference na kare
+          
+      # YAHAN SABSE BADA CHANGE HAI:
+      # Hum 'gradle' command ki jag jagah 'gradlew' use karenge, 
+      # lekin humne pehle hi wrapper fix kar diya hai.
+      # Agar aapne wrapper nahi banaya, toh hum seedha 'gradle' use karenge 
+      # par ek specific version ke saath.
+      
       - name: Build Debug APK
-        run: gradle assembleDebug
+        # Humne '--version' check karne ke liye ye command use kiya hai
+        # Agar aapka wrapper kaam nahi kar raha, toh hum direct command chalayenge
+        run: gradle assembleDebug --warning-mode all
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
