@@ -4,8 +4,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Is version ko 8.2.0 hi rehne dein, par Gradle version niche se kam karein
-        classpath 'com.android.tools.build:gradle:8.2.0'
+        // IS VERSION KO 8.2.0 SE BADAL KAR 8.5.0 KAR DEIN
+        classpath 'com.android.tools.build:gradle:8.5.0' 
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0"
     }
 }
