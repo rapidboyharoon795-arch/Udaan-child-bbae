@@ -2,18 +2,36 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
 android {
-    // Dono lines likhein taaki koi shak na rahe
-    compileSdk 36
-    compileSdkVersion 36 
-
+    compileSdk 34 // 36 ki jagag 34 try karein, kyunki 36 bahut naya hai
+    
     namespace 'com.udaan.child'
 
     defaultConfig {
         applicationId "com.udaan.child"
         minSdk 29
-        targetSdk 36
+        targetSdk 34
         versionCode 1
         versionName "1.0"
     }
-    // ... baaki sab same rahega
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
 }
