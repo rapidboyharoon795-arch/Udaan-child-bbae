@@ -6,7 +6,6 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
-    // YAHAN BADLAV HAI: FAIL_ON_PROJECT_REPOS ki jagah PREFER_SETTINGS karein
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
@@ -14,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "UdaanChild"
-include ':app'
+include ':app' // <--- YEH LINE HONI CHAHIYE
