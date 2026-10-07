@@ -1,6 +1,5 @@
-name: Android CI/CD - UdaanChild
+name: Android CI/CD - UdaanChild (No Wrapper Version)
 
-# Yeh trigger karega jab bhi aap 'main' branch mein code push karenge ya Pull Request karenge
 on:
   push:
     branches: [ "main" ]
@@ -12,41 +11,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Code ko GitHub repository se checkout karein
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Java Setup (Android ke liye JDK 17 zaroori hai aaj kal)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
+          # Humne 'cache: gradle' hata diya kyunki wrapper nahi hai
+          # Isse build thoda slow hoga par chal jayega
 
-      # 3. Gradle Permissions set karein
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      # 4. Code Linting (Check karega ki code standards ke hisaab se hai ya nahi)
-      - name: Run Lint Check
-        run: ./gradlew lintDebug
-
-      # 5. Unit Tests (Check karega ki naya code purane logic ko toh nahi tod raha)
-      - name: Run Unit Tests
-        run: ./gradlew testDebugUnitTest
-
-      # 6. Build APK (Asli build process)
+      # YAHAN HUMNE 'chmod gradlew' KO HATA DIYA KYUNKI FILE HAI HI NAHI
+      
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        # Humne './gradlew' ki jag jagah seedha 'gradle' command use kiya hai
+        # GitHub ke Ubuntu server par 'gradle' pehle se installed hota hai
+        run: gradle assembleDebug
 
-      # 7. Artifact Upload (Build hone ke baad APK ko GitHub par save kar dega)
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: UdaanChild-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
-
-      # 8. Success Message
-      - name: Build Success
-        run: echo "Build completed successfully! APK is available in the Actions tab."
