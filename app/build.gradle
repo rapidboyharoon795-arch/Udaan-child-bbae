@@ -1,8 +1,8 @@
-// YAHAN PLUGIN HONA CHAHIYE
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
 android {
+    // IS LINE KO CHECK KAREIN - Yahi error de rahi hai
     compileSdk 36 
 
     namespace 'com.udaan.child'
