@@ -17,7 +17,7 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
-    // Dynamic permission list according to Android version
+    // Dynamic list taaki purane Android versions par crash na ho
     private val requiredPermissions: Array<String> by lazy {
         val permissions = mutableListOf(
             Manifest.permission.READ_PHONE_STATE,
@@ -25,7 +25,6 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_CONTACTS
         )
-        // POST_NOTIFICATIONS Android 13+ (API 33) me required hai
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -44,62 +43,44 @@ class MainActivity : AppCompatActivity() {
         permissionButton = findViewById(R.id.permissionButton)
         startButton = findViewById(R.id.startButton)
 
-        setupListeners()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        updateUIState()
-    }
-
-    private fun setupListeners() {
-        permissionButton.setOnClickListener {
-            requestAllPermissions()
-        }
-
-        startButton.setOnClickListener {
-            if (hasAllPermissions()) {
-                startRecordingService()
-            } else {
-                Toast.makeText(this, "Please grant all permissions first", Toast.LENGTH_SHORT).show()
-                requestAllPermissions()
-            }
-        }
-    }
-
-    private fun startRecordingService() {
-        val serviceIntent = Intent(this, CallRecorderService::class.java).apply {
-            putExtra("ACTION", "START_SERVICE")
-        }
-        ContextCompat.startForegroundService(this, serviceIntent)
-        statusText.text = "Status: Service Running"
+        permissionButton.setOnClickListener { requestAllPermissions() }
+        startButton.setOnClickListener { startService() }
     }
 
     private fun requestAllPermissions() {
-        val missing = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        val missing = mutableListOf<String>()
+        for (perm in requiredPermissions) {
+            if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+                missing.add(perm)
+            }
         }
-
         if (missing.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, missing.toTypedArray(), 1001)
         } else {
             Toast.makeText(this, "All permissions already granted", Toast.LENGTH_SHORT).show()
-            updateUIState()
+        }
+    }
+
+    private fun startService() {
+        if (hasAllPermissions()) {
+            val serviceIntent = Intent(this, CallRecorderService::class.java).apply {
+                putExtra("ACTION", "START_SERVICE")
+            }
+            // Compatibility helper: Android 8+ par startForegroundService aur older par startService chalata hai
+            ContextCompat.startForegroundService(this, serviceIntent)
+            statusText.text = "Status: Service Running"
+        } else {
+            statusText.text = "Status: Permissions Required"
         }
     }
 
     private fun hasAllPermissions(): Boolean {
-        return requiredPermissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        for (perm in requiredPermissions) {
+            if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+                return false
+            }
         }
-    }
-
-    private fun updateUIState() {
-        if (hasAllPermissions()) {
-            statusText.text = "Status: Permissions Granted (Ready)"
-        } else {
-            statusText.text = "Status: Permissions Required"
-        }
+        return true
     }
 
     override fun onRequestPermissionsResult(
@@ -115,10 +96,9 @@ class MainActivity : AppCompatActivity() {
                     denied.add(permissions[i])
                 }
             }
-
             if (denied.isEmpty()) {
                 Toast.makeText(this, "All permissions granted", Toast.LENGTH_SHORT).show()
-                startRecordingService()
+                startService()
             } else {
                 showOpenSettingsDialog(denied)
             }
@@ -126,10 +106,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showOpenSettingsDialog(denied: List<String>) {
-        val cleanNames = denied.map { it.substringAfterLast(".") }
         AlertDialog.Builder(this)
             .setTitle("Permissions Required")
-            .setMessage("App requires these permissions to function:\n\n• " + cleanNames.joinToString("\n• "))
+            .setMessage("The following permissions were denied:\n\n" + denied.joinToString("\n"))
             .setPositiveButton("Open Settings") { _, _ ->
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = Uri.parse("package:$packageName")
